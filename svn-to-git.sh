@@ -9,6 +9,7 @@
 # http://john.albin.net/git/convert-subversion-to-git
 # http://blog.woobling.org/2009/06/git-svn-abandon.html
 # http://treyhunner.com/2011/11/migrating-from-subversion-to-git/
+# http://stackoverflow.com/questions/2244252/importing-svn-branches-and-tags-on-git-svn
 #
 # Requires:
 #   git-svn-abandon
@@ -28,11 +29,18 @@ else
   REPO_URL=https://svn.example.com/svn/myrepo
 fi
 
-# Check if repo directory is not provided
+# Check if repo name is not provided
 if [ -n "$2" ]; then
-  REPO_DIR=$REPO_ROOT/$2
+  REPO_NAME=$2
 else
-  REPO_DIR=$REPO_ROOT/example.com/myrepo
+  REPO_NAME=myrepo
+fi
+
+# Check if repo directory is not provided
+if [ -n "$3" ]; then
+  REPO_DIR=$REPO_ROOT/$3/$REPO_NAME
+else
+  REPO_DIR=$REPO_ROOT/example.com/$REPO_NAME
 fi
 
 # System variables
@@ -42,53 +50,53 @@ STEP=0
 
 # Checkout the original SVN repo
 fnSVNCheckoutRepo() {
-  svn checkout $REPO_URL $REPO_DIR.svn
+  svn checkout $REPO_URL $REPO_DIR/$REPO_NAME.svn
 }
 
 # Retrieve a list of SVN committers from the original SVN repo
 fnSVNGetCommitters() {
-  #svn log ^/ --xml $REPO_DIR.svn | grep -P "^<author" | sort -u | perl -pe 's/<author>(.*?)<\/author>/$1 = /' > $ROOT_PATH/authors-transform.txt
-  svn log -q $REPO_DIR.svn | awk -F '|' '/^r/ {sub("^ ", "", $2); sub(" $", "", $2); print $2" = "$2" <"$2">"}' | sort -u > $ROOT_PATH/authors-transform.txt
+  #svn log ^/ --xml $REPO_DIR/$REPO_NAME.svn | grep -P "^<author" | sort -u | perl -pe 's/<author>(.*?)<\/author>/$1 = /' > $REPO_DIR/authors-transform.txt
+  svn log -q $REPO_DIR/$REPO_NAME.svn | awk -F '|' '/^r/ {sub("^ ", "", $2); sub(" $", "", $2); print $2" = "$2" <"$2">"}' | sort -u > $REPO_DIR/authors-transform.txt
 }
 
 # Clone the SVN repo using git-svn to a transitional Git SVN repo
 fnGitSVNCloneRepo() {
-  #git svn clone $REPO_URL -A $ROOT_PATH/authors-transform.txt --stdlayout $REPO_DIR.gitsvn --prefix=svn/ --no-metadata
-  git svn clone $REPO_URL -A $ROOT_PATH/authors-transform.txt --stdlayout $REPO_DIR.gitsvn --prefix=svn/
+  #git svn clone $REPO_URL -A $REPO_DIR/authors-transform.txt --stdlayout $REPO_DIR/$REPO_NAME.gitsvn --prefix=svn/ --no-metadata
+  git svn clone $REPO_URL -A $REPO_DIR/authors-transform.txt --stdlayout $REPO_DIR/$REPO_NAME.gitsvn --prefix=svn/
 }
 
 # Convert svn:ignore properties to .gitignore in the transitional Git SVN repo
 fnGitSVNConvertIgnore() {
-  #cd $REPO_DIR.gitsvn
-  #git svn show-ignore > $REPO_DIR.gitsvn/.gitignore
-  cd $REPO_DIR.svn
-  svn propget -R svn:ignore | sed 's/ - /\//' > $REPO_DIR.gitsvn/.gitignore
-  cd $REPO_DIR.gitsvn
+  #cd $REPO_DIR/$REPO_NAME.gitsvn
+  #git svn show-ignore > $REPO_DIR/$REPO_NAME.gitsvn/.gitignore
+  cd $REPO_DIR/$REPO_NAME.svn
+  svn propget -R svn:ignore | sed 's/ - /\//' > $REPO_DIR/$REPO_NAME.gitsvn/.gitignore
+  cd $REPO_DIR/$REPO_NAME.gitsvn
   git add .gitignore
   git commit -m 'Convert svn:ignore properties to .gitignore.'
 }
 
 # Clone the transitional Git SVN repo to the final Git repo
 fnGitCloneRepo() {
-  git clone file://$REPO_DIR.gitsvn $REPO_DIR.git
+  git clone file://$REPO_DIR/$REPO_NAME.gitsvn $REPO_DIR/$REPO_NAME.git
 }
 
 # Cleanup tags and branches on the final Git repo
 fnGitCleanupTagsBranches() {
-  cd $REPO_DIR.git
+  cd $REPO_DIR/$REPO_NAME.git
   git svn-abandon-fix-refs
   git svn-abandon-cleanup
 }
 
 # Remove git-svn-id messages on the final Git repo
 fnGitRemoveSvnIdMessages() {
-  cd $REPO_DIR.git
+  cd $REPO_DIR/$REPO_NAME.git
   git filter-branch -f --msg-filter 'sed -e "/git-svn-id:/d"'
 }
 
 # Remove empty commit messages on the final Git repo
 fnGitRemoveEmptyCommitMessages() {
-  cd $REPO_DIR.git
+  cd $REPO_DIR/$REPO_NAME.git
   git filter-branch -f --msg-filter '
   read msg
   if [ -n "$msg" ] ; then
@@ -100,9 +108,9 @@ fnGitRemoveEmptyCommitMessages() {
 
 # Collect garbage on the Git repos
 fnGitCollectGarbageRepos() {
-  cd $REPO_DIR.gitsvn
+  cd $REPO_DIR/$REPO_NAME.gitsvn
   git gc
-  cd $REPO_DIR.git
+  cd $REPO_DIR/$REPO_NAME.git
   git gc
 }
 
@@ -113,9 +121,9 @@ echo "SVN to Git migration script"
 echo "--------------------------------------------------------------------------------"
 printf "\n"
 echo "Repository: $REPO_URL"
-echo "Original SVN repo: $REPO_DIR.svn"
-echo "Transitional Git SVN repo: $REPO_DIR.gitsvn"
-echo "Final Git repo: $REPO_DIR.git"
+echo "Original SVN repo: $REPO_DIR/$REPO_NAME.svn"
+echo "Transitional Git SVN repo: $REPO_DIR/$REPO_NAME.gitsvn"
+echo "Final Git repo: $REPO_DIR/$REPO_NAME.git"
 read -p "Press ${TEXT_BOLD}[ENTER]${TEXT_NORMAL} to continue..."
 
 mkdir -p $REPO_ROOT
@@ -244,10 +252,10 @@ echo "Done migrating!"
 echo "--------------------------------------------------------------------------------"
 printf "\n"
 echo "Repository: $REPO_URL"
-echo "Original SVN repo: $REPO_DIR.svn"
-echo "Transitional Git SVN repo: $REPO_DIR.gitsvn"
-echo "Final Git repo: $REPO_DIR.git"
+echo "Original SVN repo: $REPO_DIR/$REPO_NAME.svn"
+echo "Transitional Git SVN repo: $REPO_DIR/$REPO_NAME.gitsvn"
+echo "Final Git repo: $REPO_DIR/$REPO_NAME.git"
 printf "\n"
-du $REPO_DIR.svn $REPO_DIR.gitsvn $REPO_DIR.git -hsc
+du $REPO_DIR/$REPO_NAME.svn $REPO_DIR/$REPO_NAME.gitsvn $REPO_DIR/$REPO_NAME.git -hsc | tee $REPO_DIR/du.log
 read -p "Press ${TEXT_BOLD}[ENTER]${TEXT_NORMAL} to continue..."
 
